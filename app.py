@@ -5,9 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain.chains.history_aware_retriever import create_history_aware_retriever
 from langchain_astradb import AstraDBVectorStore
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 import uvicorn
@@ -24,8 +26,10 @@ logger.info("Loading environment variables...")
 load_dotenv()
 
 required_env_vars = [
-    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_API_ENDPOINT",
+    "AZURE_OPENAI_API_VERSION",
     "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_API_DEPLOYMENT",
     "ASTRA_DB_API_ENDPOINT",
     "ASTRA_DB_APPLICATION_TOKEN",
     "ASTRA_DB_COLLECTION",
@@ -73,28 +77,37 @@ except Exception as e:
     logger.error(f"Error connecting to AstraDB vector store: {str(e)}")
     sys.exit(1)
 
-logger.info("Creating conversational chain...")
-memory = ConversationBufferMemory(
-    memory_key="chat_history",
-    return_messages=True,
-    output_key="answer",
-    max_messages=10,
-)
+logger.info("Creating retrieval chain...")
 
-template = """
+# Prompt for answering user's question
+qa_template = """
     You are a helpful assistant specialized in answering technical questions related to Keploy. You are provided with context from a vector database and a chat history. Your task is to answer the user's question based on the provided context and the chat history. If you don't know the answer, just say 'I don't know'. Do not try to make up an answer. If the question is not related to Keploy, say 'I am not sure about that'."
 
     Context: {context}
-    Question: {question}
+    Question: {input}
     Answer: 
     """
 
-prompt = PromptTemplate(template=template, input_variables=["context", "question"])
+qa_prompt = PromptTemplate(template=qa_template, input_variables=["context", "input"])
+
+# Prompt for creating search queries based on conversation history
+condense_template = """
+Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question that captures all relevant context from the conversation.
+
+Chat History:
+{chat_history}
+
+Follow Up Question: {input}
+
+Standalone question:
+"""
+
+condense_prompt = PromptTemplate.from_template(condense_template)
 
 try:
     logger.info("Setting up Azure OpenAI...")
     llm = AzureChatOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_API_ENDPOINT"),
         openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         azure_deployment=os.getenv("AZURE_OPENAI_API_DEPLOYMENT"),
         api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
@@ -105,15 +118,17 @@ except Exception as e:
     logger.error(f"Error setting up Azure OpenAI: {str(e)}")
     sys.exit(1)
 
-conversation_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectordb.as_retriever(search_kwargs={"k": 3}),
-    memory=memory,
-    return_source_documents=True,
-    verbose=False,
-    combine_docs_chain_kwargs={"prompt": prompt},
-)
-logger.info("Conversational chain created successfully.")
+# Create the history-aware retriever
+base_retriever = vectordb.as_retriever(search_kwargs={"k": 3})
+retriever = create_history_aware_retriever(llm, base_retriever, condense_prompt)
+
+# Create the document chain
+question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+# Create the retrieval chain
+retrieval_chain = create_retrieval_chain(retriever, question_answer_chain)
+
+logger.info("Retrieval chain created successfully.")
 
 
 class Question(BaseModel):
@@ -128,18 +143,27 @@ def chat(question: Question):
         raise HTTPException(status_code=400, detail="No question provided")
 
     try:
-        search_results = vectordb.similarity_search(question.question, k=3)
-        context = "\n".join([doc.page_content for doc in search_results])
+        # Store chat history in the request context
+        chat_history = []  # This would be persisted per user in a real application
 
-        response = conversation_chain({"question": question.question})
+        # Process the question with chat history
+        response = retrieval_chain.invoke(
+            {"chat_history": chat_history, "input": question.question}
+        )
 
-        # logger.info(f"Response from conversation chain: {response}")
+        # Update chat history for future requests (in a real app, this would be stored)
+        chat_history.append(HumanMessage(content=question.question))
+        chat_history.append(AIMessage(content=response["answer"]))
+
+        # Extract source documents
+        source_docs = response.get("context", [])
 
         result = {
             "answer": response["answer"],
             "sources": [
                 doc.metadata.get("source", "Unknown")
-                for doc in response.get("source_documents", [])
+                for doc in source_docs
+                if hasattr(doc, "metadata")
             ],
         }
         return result
