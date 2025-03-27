@@ -10,7 +10,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains.history_aware_retriever import create_history_aware_retriever
-from langchain_astradb import AstraDBVectorStore
+from langchain_astradb import AstraDBVectorStore, utils
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 import logging
 from typing import List, Optional
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
             embedding=NVIDIAEmbeddings(
                 model="nvidia/embed-qa-4", api_key=os.getenv("NVIDIA_API_KEY")
             ),
+            setup_mode=utils.astradb.SetupMode.OFF, # the collection will be used as-is
         )
         logger.info("AstraDB vector store setup completed.")
         return vector_store

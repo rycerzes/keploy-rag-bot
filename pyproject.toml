@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "astrapy>=1.5.2",
+    "deepeval",
     "fastapi[standard]>=0.115.12",
+    "google-generativeai>=0.8.4",
     "langchain>=0.3.21",
     "langchain-astradb>=0.5.3",
     "langchain-community>=0.3.20",
