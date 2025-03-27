@@ -1,0 +1,22 @@
+[
+  {
+    "question": "What is Keploy?",
+    "expected_answer": "Keploy is an open-source API testing platform that generates tests and data mocks from API calls."
+  },
+  {
+    "question": "How does Keploy handle test data mocking?",
+    "expected_answer": "Keploy automatically captures and mocks API dependencies, including databases and external services, to create reliable test environments without manual setup."
+  },
+  {
+    "question": "What programming languages does Keploy support?",
+    "expected_answer": "Keploy supports Go, Java, TypeScript/JavaScript and HTTP-based applications, with more language support being added."
+  },
+  {
+    "question": "How do I install Keploy?",
+    "expected_answer": "Keploy can be installed via Docker, Kubernetes, or as a binary download depending on your environment. The installation process varies by programming language and platform."
+  },
+  {
+    "question": "What are the key features of Keploy?",
+    "expected_answer": "Key features of Keploy include automatic test generation, data mocking, deduplication of test cases, regression testing, and integration with CI/CD pipelines."
+  }
+]

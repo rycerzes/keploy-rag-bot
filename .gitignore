@@ -176,3 +176,5 @@ cython_debug/
 # deepeval 
 .deepeval*
 results/
+temp_test_run_data.json
+evaluation_report.json
