@@ -1,0 +1,17 @@
+---
+services:
+  api:
+    image: keploy-rag-bot:latest
+    container_name: api
+    restart: unless-stopped # restart policy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    healthcheck:
+      # healthcheck on / route of API
+      test: >
+        bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000 && echo -e "GET / HTTP/1.1\r\nhost: 127.0.0.1:8000\r\nConnection: close\r\n\r\n" >&3 && cat <&3 | grep -q "ok"'
+      interval: 20s
+      timeout: 10s
+      retries: 5

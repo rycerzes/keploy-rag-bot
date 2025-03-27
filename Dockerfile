@@ -1,17 +1,35 @@
-# Use an official Python runtime as a parent image
-FROM python:3.9-slim
+FROM python:3.12-slim
 
-# Set the working directory in the container
-WORKDIR /app
+ENV PYTHONUNBUFFERED=1
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+WORKDIR /app/
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/ 
 
-# Make port 8000 available to the world outside this container
+ENV PATH="/app/.venv/bin:$PATH"
+
 EXPOSE 8000
 
-# Run the FastAPI app when the container launches
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# compile bytecode
+ENV UV_COMPILE_BYTECODE=1
+
+# uv cache
+ENV UV_LINK_MODE=copy
+
+# install deps
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project
+
+ENV PYTHONPATH=/app
+
+COPY ./pyproject.toml ./uv.lock /app/
+
+COPY ./*.py /app/
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync
+
+CMD ["fastapi", "run", "main.py", "--port", "8000", "--host", "0.0.0.0"]
