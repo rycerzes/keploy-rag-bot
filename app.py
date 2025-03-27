@@ -1,6 +1,6 @@
 import sys
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -13,6 +13,8 @@ from langchain.chains.history_aware_retriever import create_history_aware_retrie
 from langchain_astradb import AstraDBVectorStore
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 import logging
+from typing import List, Optional
+from brain import get_index_for_mdx
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +25,13 @@ logger = logging.getLogger(__name__)
 
 class Question(BaseModel):
     question: str
+
+
+class UploadResponse(BaseModel):
+    success: bool
+    message: str
+    processed_files: List[str] = []
+    failed_files: List[str] = []
 
 
 def create_app() -> FastAPI:
@@ -222,6 +231,86 @@ def create_app() -> FastAPI:
             logger.error(f"Error during chat processing: {str(e)}")
             raise HTTPException(
                 status_code=500, detail="An error occurred during chat processing"
+            )
+
+    @app.post(
+        "/upload",
+        response_model=UploadResponse,
+        tags=["documents"],
+        summary="Upload documents for vectorization",
+    )
+    async def upload_documents(
+        files: List[UploadFile] = File(...), collection: Optional[str] = Form(None)
+    ):
+        """
+        Upload documents to be processed and vectorized in AstraDB.
+
+        - **files**: List of files to upload (.md, .mdx supported)
+        - **collection**: Optional collection name (defaults to configured collection)
+        """
+        logger.info(f"Received document upload request with {len(files)} files")
+
+        if not files:
+            logger.warning("No files provided for upload")
+            raise HTTPException(status_code=400, detail="No files provided")
+
+        # Validate file types
+        allowed_extensions = [".md", ".mdx"]
+        processed_files = []
+        failed_files = []
+
+        mdx_files = []
+        mdx_names = []
+
+        for file in files:
+            filename = file.filename
+            file_ext = os.path.splitext(filename)[1].lower()
+
+            if file_ext not in allowed_extensions:
+                failed_files.append(f"{filename} (Unsupported file type)")
+                continue
+
+            try:
+                # Read file content
+                content = await file.read()
+                mdx_files.append(content)
+                mdx_names.append(filename)
+                processed_files.append(filename)
+            except Exception as e:
+                logger.error(f"Error reading file {filename}: {str(e)}")
+                failed_files.append(f"{filename} (Error: {str(e)})")
+
+        if not mdx_files:
+            return UploadResponse(
+                success=False,
+                message="No valid files were uploaded",
+                processed_files=[],
+                failed_files=failed_files,
+            )
+
+        try:
+            # Use the brain.py function to vectorize documents
+            logger.info(f"Vectorizing {len(mdx_files)} documents")
+            collection = get_index_for_mdx(mdx_files, mdx_names)
+
+            return UploadResponse(
+                success=True,
+                message=f"Successfully processed {len(processed_files)} documents",
+                processed_files=processed_files,
+                failed_files=failed_files,
+            )
+        except Exception as e:
+            logger.error(f"Error during document vectorization: {str(e)}")
+            # Add successfully read files to failed files with error message
+            failed_files.extend(
+                [f"{name} (Error during vectorization)" for name in processed_files]
+            )
+
+            return UploadResponse(
+                success=False,
+                message=f"Error during vectorization: {str(e)}",
+                processed_files=[],
+                failed_files=failed_files,
             )
 
     return app

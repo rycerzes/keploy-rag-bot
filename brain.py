@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-COLLECTION_NAME = "keploy_docs_test"
+COLLECTION_NAME = "keploy_docs"
 EMBEDDING_DIMENSION = 1024
 MAX_VECTORIZE_LENGTH = 1000  # 1000 to stay under token limits
 MAX_TOKENS = 475  # 512 token maximum
@@ -241,6 +241,7 @@ def store_documents(collection, documents: List[Document]) -> None:
         f"Indexing complete: {success_count} succeeded, {error_count} failed out of {total_docs} documents"
     )
 
+
 def get_index_for_mdx(mdx_files, mdx_names):
     """Create or update index for MDX files using AstraDB"""
     print(f"Creating index for {len(mdx_files)} document files...")
@@ -277,6 +278,7 @@ def update_index_with_code(
     store_documents(collection, documents)
 
     return collection
+
 
 if __name__ == "__main__":
     """Main function to test the functionality"""
