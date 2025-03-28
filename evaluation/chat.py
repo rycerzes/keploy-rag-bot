@@ -5,8 +5,7 @@ import sys
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain.memory import ConversationBufferMemory
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_astradb import AstraDBVectorStore, utils
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 
@@ -81,7 +80,7 @@ def setup_rag_chain(vector_store, llm):
 
     prompt = ChatPromptTemplate.from_template(template)
 
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    # Remove the deprecated ConversationBufferMemory and use a simple function
 
     def format_docs(docs):
         formatted_content = "\n\n".join(doc.page_content for doc in docs)
@@ -99,18 +98,28 @@ def setup_rag_chain(vector_store, llm):
             return formatted_content + source_info
         return formatted_content
 
-    rag_chain = (
-        {
-            "context": retriever | format_docs,
-            "question": RunnablePassthrough(),
-            "chat_history": memory.load_memory_variables,
-        }
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
+    def get_formatted_chat_history(chat_history):
+        return "\n".join([f"{m.type}: {m.content}" for m in chat_history])
 
-    return rag_chain, memory
+    def rag_chain(question, chat_history):
+        # Format the chat history
+        formatted_chat_history = get_formatted_chat_history(chat_history)
+        
+        # Get documents from the retriever
+        docs = retriever.invoke(question)
+        formatted_docs = format_docs(docs)
+        
+        # Run through the prompt, LLM, and parser
+        chain_input = {
+            "context": formatted_docs,
+            "chat_history": formatted_chat_history,
+            "question": question
+        }
+        response = prompt.invoke(chain_input)
+        result = llm.invoke(response)
+        return StrOutputParser().invoke(result)
+
+    return rag_chain
 
 
 def main():
@@ -119,7 +128,10 @@ def main():
     # Setup components
     vector_store = setup_astradb()
     llm = setup_llm()
-    rag_chain, memory = setup_rag_chain(vector_store, llm)
+    rag_chain = setup_rag_chain(vector_store, llm)
+    
+    # Initialize chat history
+    chat_history = []
 
     print("RAG Chatbot is ready! Type 'exit' to quit.")
 
@@ -133,10 +145,11 @@ def main():
 
         try:
             # Get response from RAG chain
-            response = rag_chain.invoke(user_input)
+            response = rag_chain(user_input, chat_history)
 
-            # Update memory
-            memory.save_context({"input": user_input}, {"output": response})
+            # Update chat history directly with message objects
+            chat_history.append(HumanMessage(content=user_input))
+            chat_history.append(AIMessage(content=response))
 
             # Print response
             print(f"\nBot: {response}")
